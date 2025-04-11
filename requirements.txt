@@ -1,0 +1,9 @@
+pandas
+scikit-learn
+torch
+skorch
+tqdm
+xgboost
+cuml-cu11
+lightgbm
+catboost 
