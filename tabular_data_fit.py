@@ -10,13 +10,25 @@ import collections # For defaultdict
 import os # For creating directory
 
 # --- Master Parameters ---
+ROOT_DIR = "." # Root directory for all relative paths
 K_FOLDS = 3
 RANDOM_STATE = 42
-DATA_PATH = "train.csv"
-COMPETITION_TEST_PATH = "test.csv" # Path to competition test data
-SUBMISSION_DIR = "submission"
+# Update paths to be relative to ROOT_DIR
+DATA_PATH = os.path.join(ROOT_DIR, "train.csv")
+COMPETITION_TEST_PATH = os.path.join(ROOT_DIR, "test.csv") # Path to competition test data
+SUBMISSION_DIR_REL = "submission" # Relative directory name
+RESULTS_DIR_REL = "results" # Relative directory name
 TARGET_COLUMN = "Listening_Time_minutes"
 ID_COLUMN = "id" # Column name for IDs in test.csv and submission
+
+# --- Model Run Flags ---
+RUN_GBT = True
+RUN_RIDGE = True
+RUN_XGB = True
+RUN_LGBM = True
+RUN_CATBOOST = True
+RUN_FNN = True # Note: FNN can be slow
+RUN_KNN = True # Note: KNN (sklearn) can be very slow on large data
 
 # --- Data Loading ---
 def load_data(path):
@@ -152,16 +164,29 @@ def main():
     else: print("No numeric columns found for descriptive statistics.")
     print("------------------------------------\n")
 
-    # --- Model Definitions ---
-    models_to_run = {
-        "GradientBoosting": models.train_evaluate_gbt,
-        "Ridge": models.train_evaluate_ridge,
-        "XGBoost": models.train_evaluate_xgb,
-        "LightGBM": models.train_evaluate_lgbm,
-        "CatBoost": models.train_evaluate_catboost,
-        "FNN": models.train_evaluate_fnn,
-        "KNN": models.train_evaluate_knn
+    # --- Build Model Dictionary Based on Flags ---
+    print("\n--- Configuring Models to Run ---")
+    potential_models = {
+        "GradientBoosting": (models.train_evaluate_gbt, RUN_GBT),
+        "Ridge": (models.train_evaluate_ridge, RUN_RIDGE),
+        "XGBoost": (models.train_evaluate_xgb, RUN_XGB),
+        "LightGBM": (models.train_evaluate_lgbm, RUN_LGBM),
+        "CatBoost": (models.train_evaluate_catboost, RUN_CATBOOST),
+        "FNN": (models.train_evaluate_fnn, RUN_FNN),
+        "KNN": (models.train_evaluate_knn, RUN_KNN)
     }
+    
+    models_to_run = {}
+    for name, (func, should_run) in potential_models.items():
+        if should_run:
+            print(f"Including model: {name}")
+            models_to_run[name] = func
+        else:
+            print(f"Excluding model: {name}")
+    
+    if not models_to_run:
+        print("\nError: No models selected to run. Please enable at least one model flag.")
+        return
 
     # --- K-Fold Setup ---
     kf = KFold(n_splits=K_FOLDS, shuffle=True, random_state=RANDOM_STATE)
@@ -304,7 +329,11 @@ def main():
     # --- Aggregate and Summarize Results --- 
     print("\n--- Overall Performance Summary (Across Folds) ---")
     summary_data = []
-    model_names_for_summary = list(models_to_run.keys()) + ['Ensemble'] 
+    # Ensure Ensemble is included only if models were run
+    model_names_for_summary = list(models_to_run.keys()) 
+    if 'Ensemble' in all_fold_results:
+         model_names_for_summary += ['Ensemble']
+    
     for model_name in model_names_for_summary:
         scores = all_fold_results[model_name]
         valid_scores = [s for s in scores if pd.notna(s)]
@@ -326,12 +355,26 @@ def main():
     display_cols = ['Backend', 'Score Summary', 'Params (Fold 1)']
     print(summary_df[display_cols])
 
+    # --- Save Summary Results to CSV ---
+    print("\n--- Saving Performance Summary ---")
+    # Construct full path using ROOT_DIR
+    results_dir_full = os.path.join(ROOT_DIR, RESULTS_DIR_REL)
+    results_path = os.path.join(results_dir_full, "model_performance_summary.csv")
+    try:
+        # Ensure the directory exists before saving
+        os.makedirs(results_dir_full, exist_ok=True)
+        # Save with index=True because the index contains the Model names
+        summary_df.to_csv(results_path, index=True)
+        print(f"Performance summary saved to: {results_path}")
+    except Exception as e:
+        print(f"Error saving performance summary to {results_path}: {e}")
+
     # --- Submission File Generation ---
     print("\n--- Generating Submission File ---")
-    # Find best *individual* model based on mean score (ignore Ensemble for submission)
-    valid_individual_summary = summary_df[summary_df.index != 'Ensemble'].dropna(subset=[f'Mean Score ({K_FOLDS}-Fold RMSE)'])
+    # Find best *individual* model among those that actually ran
+    valid_individual_summary = summary_df[(summary_df.index != 'Ensemble') & (summary_df.index.isin(models_to_run.keys()))].dropna(subset=[f'Mean Score ({K_FOLDS}-Fold RMSE)'])
     if valid_individual_summary.empty:
-        print("No models succeeded across folds. Cannot determine best model for submission.")
+        print("No individual models succeeded across folds. Cannot determine best model for submission.")
         return
     best_model_name = valid_individual_summary[f'Mean Score ({K_FOLDS}-Fold RMSE)'].idxmin()
     print(f"Best individual model (based on mean CV score): {best_model_name}")
@@ -435,9 +478,14 @@ def main():
         return
 
     # Create submission directory if it doesn't exist
-    if not os.path.exists(SUBMISSION_DIR):
-        os.makedirs(SUBMISSION_DIR)
-        print(f"Created directory: {SUBMISSION_DIR}")
+    submission_dir_full = os.path.join(ROOT_DIR, SUBMISSION_DIR_REL)
+    # Ensure the directory exists before saving
+    try:
+        os.makedirs(submission_dir_full, exist_ok=True)
+        print(f"Ensured submission directory exists: {submission_dir_full}")
+    except OSError as e:
+        print(f"Error creating submission directory {submission_dir_full}: {e}. Cannot save submission.")
+        return # Exit if directory cannot be created
 
     # Create submission DataFrame
     # Ensure IDs and predictions align, especially if rows were dropped from test during imputation
@@ -463,7 +511,7 @@ def main():
     })
 
     # Save submission file
-    submission_path = os.path.join(SUBMISSION_DIR, "submission.csv")
+    submission_path = os.path.join(submission_dir_full, "submission.csv")
     try:
         submission_df.to_csv(submission_path, index=False)
         print(f"Submission file saved to: {submission_path}")
