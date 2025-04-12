@@ -8,27 +8,86 @@ import io
 from sklearn.metrics import mean_squared_error
 import collections # For defaultdict
 import os # For creating directory
+import pathlib # For path manipulation and directory creation
+import argparse # For command-line arguments
+
+# --- Parse Arguments ---
+def parse_args():
+    parser = argparse.ArgumentParser(description='Tabular data fitting with multiple models')
+    
+    # Root directory
+    parser.add_argument('--root_dir', type=str, default=os.path.dirname(os.path.abspath(__file__)),
+                        help='Root directory of the project')
+    
+    # Dataset paths
+    parser.add_argument('--train_path', type=str, default=None,
+                        help='Path to training data CSV')
+    parser.add_argument('--test_path', type=str, default=None, 
+                        help='Path to competition test data CSV')
+    
+    # K-Fold parameter
+    parser.add_argument('--k_folds', type=int, default=3,
+                        help='Number of folds for cross-validation')
+    
+    # Model flags
+    parser.add_argument('--run_gbt', action='store_true', default=True,
+                        help='Run Gradient Boosting model')
+    parser.add_argument('--no_gbt', action='store_false', dest='run_gbt',
+                        help='Do not run Gradient Boosting model')
+    
+    parser.add_argument('--run_ridge', action='store_true', default=True,
+                        help='Run Ridge Regression model')
+    parser.add_argument('--no_ridge', action='store_false', dest='run_ridge',
+                        help='Do not run Ridge Regression model')
+    
+    parser.add_argument('--run_xgb', action='store_true', default=True,
+                        help='Run XGBoost model')
+    parser.add_argument('--no_xgb', action='store_false', dest='run_xgb',
+                        help='Do not run XGBoost model')
+    
+    parser.add_argument('--run_lgbm', action='store_true', default=True,
+                        help='Run LightGBM model')
+    parser.add_argument('--no_lgbm', action='store_false', dest='run_lgbm',
+                        help='Do not run LightGBM model')
+    
+    parser.add_argument('--run_catboost', action='store_true', default=True,
+                        help='Run CatBoost model')
+    parser.add_argument('--no_catboost', action='store_false', dest='run_catboost',
+                        help='Do not run CatBoost model')
+    
+    parser.add_argument('--run_fnn', action='store_true', default=True,
+                        help='Run Feed-forward Neural Network model')
+    parser.add_argument('--no_fnn', action='store_false', dest='run_fnn',
+                        help='Do not run Feed-forward Neural Network model')
+    
+    parser.add_argument('--run_knn', action='store_true', default=True,
+                        help='Run K-Nearest Neighbors model')
+    parser.add_argument('--no_knn', action='store_false', dest='run_knn',
+                        help='Do not run K-Nearest Neighbors model')
+    
+    args = parser.parse_args()
+    
+    # Set default paths if not provided
+    if args.train_path is None:
+        args.train_path = os.path.join(args.root_dir, "train.csv")
+    if args.test_path is None:
+        args.test_path = os.path.join(args.root_dir, "test.csv")
+    
+    return args
 
 # --- Master Parameters ---
-ROOT_DIR = "." # Root directory for all relative paths
-K_FOLDS = 3
 RANDOM_STATE = 42
-# Update paths to be relative to ROOT_DIR
-DATA_PATH = os.path.join(ROOT_DIR, "train.csv")
-COMPETITION_TEST_PATH = os.path.join(ROOT_DIR, "test.csv") # Path to competition test data
-SUBMISSION_DIR_REL = "submission" # Relative directory name
-RESULTS_DIR_REL = "results" # Relative directory name
 TARGET_COLUMN = "Listening_Time_minutes"
 ID_COLUMN = "id" # Column name for IDs in test.csv and submission
 
-# --- Model Run Flags ---
-RUN_GBT = True
-RUN_RIDGE = True
-RUN_XGB = True
-RUN_LGBM = True
-RUN_CATBOOST = True
-RUN_FNN = True # Note: FNN can be slow
-RUN_KNN = True # Note: KNN (sklearn) can be very slow on large data
+# --- Helper Functions ---
+def ensure_dir_exists(file_path):
+    """Ensures the directory for a file exists, creates it if not."""
+    directory = os.path.dirname(file_path)
+    if directory and not os.path.exists(directory):
+        pathlib.Path(directory).mkdir(parents=True, exist_ok=True)
+        print(f"Created directory: {directory}")
+    return directory
 
 # --- Data Loading ---
 def load_data(path):
@@ -39,11 +98,11 @@ def load_data(path):
         print("Data loaded successfully.")
         print(f"  Shape: {df.shape}")
         # Optional: Ensure target column is present early
-        if TARGET_COLUMN not in df.columns and path == DATA_PATH:
+        if TARGET_COLUMN not in df.columns and 'train' in path.lower():
              print(f"Error: Target column '{TARGET_COLUMN}' not found in loaded training data.")
              return pd.DataFrame()
         # Ensure ID column is present in test data
-        if ID_COLUMN not in df.columns and path == COMPETITION_TEST_PATH:
+        if ID_COLUMN not in df.columns and 'test' in path.lower():
             print(f"Error: ID column '{ID_COLUMN}' not found in loaded competition test data.")
             # Allow continuing if ID is missing, but submission will fail later
             # return pd.DataFrame()
@@ -143,8 +202,25 @@ def preprocess_fold_data(df_train, df_test, target_col):
 
 
 # --- Main K-Fold Workflow ---
-def main():
+def main(args):
     """Main function: K-Fold CV for model evaluation & submission generation."""
+    # Set up paths based on args
+    ROOT_DIR = args.root_dir
+    DATA_PATH = args.train_path
+    COMPETITION_TEST_PATH = args.test_path
+    K_FOLDS = args.k_folds
+    SUBMISSION_DIR = os.path.join(ROOT_DIR, "submission")
+    RESULTS_DIR = os.path.join(ROOT_DIR, "results")
+
+    # Model flags from args
+    RUN_GBT = args.run_gbt
+    RUN_RIDGE = args.run_ridge
+    RUN_XGB = args.run_xgb
+    RUN_LGBM = args.run_lgbm
+    RUN_CATBOOST = args.run_catboost
+    RUN_FNN = args.run_fnn
+    RUN_KNN = args.run_knn
+    
     df_original = load_data(DATA_PATH)
     if df_original.empty: return
 
@@ -357,12 +433,10 @@ def main():
 
     # --- Save Summary Results to CSV ---
     print("\n--- Saving Performance Summary ---")
-    # Construct full path using ROOT_DIR
-    results_dir_full = os.path.join(ROOT_DIR, RESULTS_DIR_REL)
-    results_path = os.path.join(results_dir_full, "model_performance_summary.csv")
+    results_path = os.path.join(RESULTS_DIR, "model_performance_summary.csv")
+    ensure_dir_exists(results_path)
+    
     try:
-        # Ensure the directory exists before saving
-        os.makedirs(results_dir_full, exist_ok=True)
         # Save with index=True because the index contains the Model names
         summary_df.to_csv(results_path, index=True)
         print(f"Performance summary saved to: {results_path}")
@@ -478,14 +552,8 @@ def main():
         return
 
     # Create submission directory if it doesn't exist
-    submission_dir_full = os.path.join(ROOT_DIR, SUBMISSION_DIR_REL)
-    # Ensure the directory exists before saving
-    try:
-        os.makedirs(submission_dir_full, exist_ok=True)
-        print(f"Ensured submission directory exists: {submission_dir_full}")
-    except OSError as e:
-        print(f"Error creating submission directory {submission_dir_full}: {e}. Cannot save submission.")
-        return # Exit if directory cannot be created
+    submission_path = os.path.join(SUBMISSION_DIR, "submission.csv")
+    ensure_dir_exists(submission_path)
 
     # Create submission DataFrame
     # Ensure IDs and predictions align, especially if rows were dropped from test during imputation
@@ -511,7 +579,6 @@ def main():
     })
 
     # Save submission file
-    submission_path = os.path.join(submission_dir_full, "submission.csv")
     try:
         submission_df.to_csv(submission_path, index=False)
         print(f"Submission file saved to: {submission_path}")
@@ -519,4 +586,5 @@ def main():
         print(f"Error saving submission file: {e}")
 
 if __name__ == "__main__":
-    main() 
+    args = parse_args()
+    main(args) 
