@@ -19,6 +19,10 @@ def parse_args():
     parser.add_argument('--root_dir', type=str, default=os.path.dirname(os.path.abspath(__file__)),
                         help='Root directory of the project')
     
+    # Output directory
+    parser.add_argument('--output_dir', type=str, default=None,
+                        help='Directory for output files (results, submissions, etc.)')
+    
     # Dataset paths
     parser.add_argument('--train_path', type=str, default=None,
                         help='Path to training data CSV')
@@ -72,6 +76,8 @@ def parse_args():
         args.train_path = os.path.join(args.root_dir, "train.csv")
     if args.test_path is None:
         args.test_path = os.path.join(args.root_dir, "test.csv")
+    if args.output_dir is None:
+        args.output_dir = os.path.join(args.root_dir, "results")
     
     return args
 
@@ -206,12 +212,19 @@ def main(args):
     """Main function: K-Fold CV for model evaluation & submission generation."""
     # Set up paths based on args
     ROOT_DIR = args.root_dir
+    OUTPUT_DIR = args.output_dir
+    
+    # Ensure output directory exists
+    if not os.path.exists(OUTPUT_DIR):
+        pathlib.Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
+        print(f"Created output directory: {OUTPUT_DIR}")
+    
     DATA_PATH = args.train_path
     COMPETITION_TEST_PATH = args.test_path
     K_FOLDS = args.k_folds
-    SUBMISSION_DIR = os.path.join(ROOT_DIR, "submission")
-    RESULTS_DIR = os.path.join(ROOT_DIR, "results")
-
+    SUBMISSION_DIR = os.path.join(OUTPUT_DIR, "submission")
+    RESULTS_DIR = OUTPUT_DIR
+    
     # Model flags from args
     RUN_GBT = args.run_gbt
     RUN_RIDGE = args.run_ridge
